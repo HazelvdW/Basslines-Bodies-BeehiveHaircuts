@@ -1,4 +1,4 @@
-full_clip_name,excerpt_label_final,genre_code,familiarity_specific_level,song_batch,no_thought_rate,creation_time_accuracy,familiarity_specific_rated
+full_clip_name,clip_label,genre_code,familiarity_M17,stimulus_group,M17-no_thought_rate,M17-creation_time_accuracy,M17-familiarity_rated
 60s_H_01_new-clip_60s_HIGH_Summer_in_the_City_-_Remastered.mp3,60s_H_01,60s,H,1,0.147058824,0.264705882,3.235294118
 80s_H_01_new-clip_80s_HIGH_Take_on_Me.mp3,80s_H_01,80s,H,1,0.052631579,0.631578947,4.368421053
 Amb_H_01_new-clip_Ambient_HIGH_A_Walk.mp3,Amb_H_01,Amb,H,1,0.125,NA,1.71875
