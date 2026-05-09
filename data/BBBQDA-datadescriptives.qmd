@@ -1,0 +1,1622 @@
+---
+title: "BBB — Data Descriptives & QDA Analysis"
+author: "HazelAvdW"
+date: 8 May 2026
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    theme: flatly
+    code-fold: true
+    self-contained: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+# Setup
+
+```{r libraries}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(reshape2)
+library(knitr)
+library(stringr)
+library(ggnewscale)
+library(ggraph)
+library(tidygraph)
+library(igraph)
+library(networkD3)
+library(htmlwidgets)
+```
+
+# Load & Merge Data
+
+The two source datasets — `MIMCdata.csv` (raw trial-level data) and `quantisedQDA.csv`
+(MAXQDA-coded quantised data) — are joined on `participant_ID × clip_label`.
+Invalid trials are filtered from `quantisedQDA` before the merge so that the
+demographics and MIMC-frequency analyses also reflect the cleaned sample.
+
+```{r load-and-merge}
+# ── 1. Load both CSVs ──────────────────────────────────────────────────────────
+ds_raw <- read.csv(
+  file.path(
+    '/Users/hazelaileenvanderwalle/Library/CloudStorage/OneDrive-Personal',
+    'work/study/PhD/_PROJECT/_MIMC_QDA/BBB_QDA/data checking',
+    'MIMCdata.csv'
+  )
+)
+
+ds_qda <- read.csv(
+  file.path(
+    '/Users/hazelaileenvanderwalle/Library/CloudStorage/OneDrive-Personal',
+    'work/study/PhD/_PROJECT/_MIMC_QDA/BBB_QDA/QDA stage3',
+    'quantisedQDA.csv'
+  )
+)
+
+# ── 2. Rename QDA clip column to match, then full join ────────────────────────
+# All columns from both CSVs are retained. Duplicate columns (shared between
+# both files) get .mimc and .qda suffixes — we keep the .mimc versions below.
+ds_qda <- ds_qda %>% rename(clip_label = excerpt_label_final)
+
+ds_full <- left_join(ds_raw, ds_qda,
+                     by = c("participant_ID", "clip_label"),
+                     suffix = c("", ".qda")) %>%
+  # Drop the .qda duplicate columns — MIMCdata versions are authoritative
+  select(-ends_with(".qda"))
+
+# ── 3. Filter invalid QDA trials ──────────────────────────────────────────────
+# ds_raw stays untouched for Part 1 (frequency, demographics, ratings).
+# ds_full has all QDA columns appended and is used for Part 2.
+invalid_docs <- c(
+  "1066 (9)", "65 (3)", "1325", "101 (8)", "406 (4)", "1308 (9)", "1269 (9)",
+  "539 (2)", "1437 (9)", "1780 (5)", "1767 (5)", "998 (2)", "1325 (6)",
+  "52 (6)", "52 (9)", "1211 (6)", "1324 (7)", "1752 (8)", "1620 (5)"
+)
+ds_full <- ds_full %>% filter(!Document.name %in% invalid_docs)
+
+cat("MIMCdata rows (full, unfiltered):    ", nrow(ds_raw), "\n")
+cat("ds_full rows (post QDA filter):      ", nrow(ds_full),      "\n")
+cat("ds_full columns:                     ", ncol(ds_full),      "\n")
+```
+
+---
+
+# Part 1 — MIMC Data Descriptives
+
+## Participant-Grouped Data
+
+```{r participant-grouped}
+ds_ptpGrouped <- ds_full %>%
+  group_by(participant_ID) %>%
+  summarise(
+    Participant_ID           = first(participant_ID),
+    Headphones               = first(demographics.headphones),
+    Gender                   = first(demographics.gender),
+    Stimulus_Group           = first(stimulus_group),
+    Age                      = first(demographics.age),
+    Age_Group                = first(age_group),
+    Country_Code             = first(country_code),
+    Living_Country           = first(demographics.livingCountry),
+    Birth_Country            = first(demographics.birthCountry),
+    Native_Language          = first(demographics.nativeLanguage),
+    Other_Language           = first(demographics.otherLanguage),
+    Other_Language_Text      = first(demographics.otherLanguageText),
+    Education_Level          = first(demographics.education),
+    Musician_Identification  = first(demographics.musicianIdentification),
+    Hearing_Impairments      = first(demographics.hearingImpariments),
+    Hearing_Impairments_Text = first(demographics.hearingImpairmentsText),
+    Feedback                 = first(demographics.feedback)
+  ) %>%
+  ungroup()
+
+cat("Total unique participants:", nrow(ds_ptpGrouped), "\n")
+```
+
+## Basic Descriptive Statistics
+
+### Age
+
+```{r age-stats}
+cat("~~~ AGE STATISTICS ~~~\n\n")
+cat("Mean age:  ", round(mean(ds_ptpGrouped$Age, na.rm = TRUE), 2), "\n")
+cat("Median age:", median(ds_ptpGrouped$Age, na.rm = TRUE), "\n")
+cat("SD age:    ", round(sd(ds_ptpGrouped$Age, na.rm = TRUE), 2), "\n")
+cat("Min age:   ", min(ds_ptpGrouped$Age, na.rm = TRUE), "\n")
+cat("Max age:   ", max(ds_ptpGrouped$Age, na.rm = TRUE), "\n")
+cat("Age NAs:   ", sum(is.na(ds_ptpGrouped$Age)), "\n")
+```
+
+### Categorical Demographics
+
+```{r categorical-demographics}
+sum_cat <- function(data, column_name) {
+  cat(sprintf("\n~~~ %s ~~~\n", toupper(column_name)))
+  counts <- table(data[[column_name]], useNA = "ifany")
+  for (value in names(counts)) {
+    pct <- round(counts[value] / sum(counts) * 100, 1)
+    cat(sprintf("%s: %d (%.1f%%)\n", value, counts[value], pct))
+  }
+}
+
+sum_cat(ds_ptpGrouped, "Gender")
+sum_cat(ds_ptpGrouped, "Age_Group")
+sum_cat(ds_ptpGrouped, "Country_Code")
+sum_cat(ds_ptpGrouped, "Living_Country")
+sum_cat(ds_ptpGrouped, "Birth_Country")
+sum_cat(ds_ptpGrouped, "Native_Language")
+sum_cat(ds_ptpGrouped, "Headphones")
+sum_cat(ds_ptpGrouped, "Education_Level")
+sum_cat(ds_ptpGrouped, "Musician_Identification")
+sum_cat(ds_ptpGrouped, "Hearing_Impairments")
+sum_cat(ds_ptpGrouped, "Stimulus_Group")
+sum_cat(ds_ptpGrouped, "expName")
+```
+
+## MIMC Frequency
+
+### Overall
+
+```{r mimc-overall}
+na_strings <- c("NA", "N/A", "na", "n/a", "Na", "N/a")
+
+ds_MIMC <- ds_full %>%
+  mutate(
+    thought_or_not_response.keys = trimws(thought_or_not_response.keys),
+    have_thought_input.text = ifelse(
+      trimws(have_thought_input.text) %in% na_strings, NA, have_thought_input.text),
+    no_thought_input.text = ifelse(
+      trimws(no_thought_input.text) %in% na_strings, NA, no_thought_input.text),
+    is_MIMC    = ifelse(thought_or_not_response.keys == 'y' &
+                          !is.na(have_thought_input.text), 1, 0),
+    is_no_MIMC = ifelse(thought_or_not_response.keys == 'n' &
+                          !is.na(no_thought_input.text), 1, 0)
+  )
+
+total_MIMCs    <- sum(ds_MIMC$is_MIMC, na.rm = TRUE)
+total_no_MIMCs <- sum(ds_MIMC$is_no_MIMC, na.rm = TRUE)
+valid_trials   <- total_MIMCs + total_no_MIMCs
+MIMC_rate      <- round(total_MIMCs / valid_trials * 100, 2)
+
+cat("Total valid trials:              ", valid_trials,  "\n")
+cat("Total MIMCs (thought reports):   ", total_MIMCs,    "\n")
+cat("Total no-MIMCs:                  ", total_no_MIMCs, "\n")
+cat("Overall MIMC rate:               ", MIMC_rate, "%\n")
+cat("Trials with missing/invalid key: ", nrow(ds_MIMC) - valid_trials, "\n")
+
+thought_reports <- ds_MIMC %>%
+  filter(is_MIMC == 1) %>%
+  mutate(word_count = sapply(strsplit(trimws(have_thought_input.text), "\\s+"), length))
+
+if (nrow(thought_reports) > 0) {
+  cat("\nThought report word count:\n")
+  cat("  Mean:  ", round(mean(thought_reports$word_count),   2), "\n")
+  cat("  Median:", round(median(thought_reports$word_count), 2), "\n")
+  cat("  SD:    ", round(sd(thought_reports$word_count),     2), "\n")
+  cat("  Min:   ", min(thought_reports$word_count),              "\n")
+  cat("  Max:   ", max(thought_reports$word_count),              "\n")
+}
+```
+
+### By Participant
+
+```{r mimc-by-participant}
+MIMC_by_participant <- ds_MIMC %>%
+  group_by(participant_ID, PROLIFIC_PID) %>%
+  summarise(
+    total_trials = n(),
+    MIMCs        = sum(is_MIMC, na.rm = TRUE),
+    no_MIMCs     = sum(is_no_MIMC, na.rm = TRUE),
+    MIMC_rate    = round(MIMCs / total_trials * 100, 1),
+    .groups = 'drop'
+  )
+
+cat("Mean MIMCs per participant:  ", round(mean(MIMC_by_participant$MIMCs), 2), "\n")
+cat("SD MIMCs per participant:    ", round(sd(MIMC_by_participant$MIMCs), 2), "\n")
+cat("Median MIMCs per participant:", median(MIMC_by_participant$MIMCs), "\n")
+cat("Min MIMCs per participant:   ", min(MIMC_by_participant$MIMCs), "\n")
+cat("Max MIMCs per participant:   ", max(MIMC_by_participant$MIMCs), "\n")
+
+hist(MIMC_by_participant$MIMC_rate,
+     breaks = 20,
+     main   = "Distribution of MIMC Rates Across Participants",
+     xlab   = "MIMC Rate (%)",
+     ylab   = "Number of Participants",
+     col    = "skyblue")
+```
+
+### By Genre
+
+```{r mimc-by-genre}
+MIMC_by_genre <- ds_MIMC %>%
+  group_by(genre_code) %>%
+  summarise(
+    total_trials = n(),
+    MIMCs        = sum(is_MIMC, na.rm = TRUE),
+    no_MIMCs     = sum(is_no_MIMC, na.rm = TRUE),
+    MIMC_rate    = round(MIMCs / total_trials * 100, 1),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(MIMC_rate))
+
+print(MIMC_by_genre)
+
+ggplot(MIMC_by_genre, aes(x = reorder(genre_code, MIMC_rate), y = MIMC_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "MIMC Rate by Genre", x = "Genre", y = "MIMC Rate (%)") +
+  theme_minimal()
+
+genre_matrix   <- MIMC_by_genre %>% select(MIMCs, no_MIMCs) %>% as.matrix()
+rownames(genre_matrix) <- MIMC_by_genre$genre_code
+genre_chi      <- chisq.test(genre_matrix)
+n_total        <- sum(genre_matrix)
+cramer_v       <- sqrt(genre_chi$statistic /
+                         (n_total * (min(nrow(genre_matrix), ncol(genre_matrix)) - 1)))
+
+cat("\nOverall chi-square test across genres:\n")
+cat(sprintf("  χ²(%d, N = %d) = %.2f, p %s, V = %.3f\n",
+    genre_chi$parameter, n_total, genre_chi$statistic,
+    ifelse(genre_chi$p.value < .001, "< .001", paste0("= ", round(genre_chi$p.value, 3))),
+    cramer_v))
+
+cat("\nPairwise chi-square tests (Bonferroni corrected):\n")
+genres <- MIMC_by_genre$genre_code
+n_genres <- length(genres)
+pairwise_results <- data.frame()
+for (i in 1:(n_genres - 1)) {
+  for (j in (i + 1):n_genres) {
+    pm <- genre_matrix[c(genres[i], genres[j]), ]
+    pc <- chisq.test(pm)
+    pairwise_results <- rbind(pairwise_results, data.frame(
+      Group1 = genres[i], Group2 = genres[j],
+      X2 = round(pc$statistic, 3), df = pc$parameter, p_raw = pc$p.value
+    ))
+  }
+}
+pairwise_results$p_bonferroni <- p.adjust(pairwise_results$p_raw, method = "bonferroni")
+pairwise_results$p_raw        <- format.pval(pairwise_results$p_raw, digits = 3, eps = .001)
+pairwise_results$p_bonferroni <- format.pval(pairwise_results$p_bonferroni, digits = 3, eps = .001)
+print(pairwise_results, row.names = FALSE)
+```
+
+### By Country
+
+```{r mimc-by-country}
+MIMC_by_country <- ds_MIMC %>%
+  group_by(country_code) %>%
+  summarise(
+    total_trials = n(),
+    participants = n_distinct(participant_ID),
+    MIMCs        = sum(is_MIMC, na.rm = TRUE),
+    no_MIMCs     = sum(is_no_MIMC, na.rm = TRUE),
+    MIMC_rate    = round(MIMCs / total_trials * 100, 1),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(MIMC_rate))
+
+print(MIMC_by_country)
+
+ggplot(MIMC_by_country, aes(x = country_code, y = MIMC_rate)) +
+  geom_bar(stat = "identity", fill = "coral") +
+  labs(title = "MIMC Rate by Country", x = "Country", y = "MIMC Rate (%)") +
+  theme_minimal()
+
+country_matrix        <- MIMC_by_country %>% select(MIMCs, no_MIMCs) %>% as.matrix()
+rownames(country_matrix) <- MIMC_by_country$country_code
+country_chi           <- chisq.test(country_matrix)
+n_total_country       <- sum(country_matrix)
+cramer_v_country      <- sqrt(country_chi$statistic /
+                                (n_total_country *
+                                   (min(nrow(country_matrix), ncol(country_matrix)) - 1)))
+
+cat("\nChi-square test (UK vs US):\n")
+cat(sprintf("  χ²(%d, N = %d) = %.2f, p %s, V = %.3f\n",
+    country_chi$parameter, n_total_country, country_chi$statistic,
+    ifelse(country_chi$p.value < .001, "< .001",
+           paste0("= ", round(country_chi$p.value, 3))),
+    cramer_v_country))
+```
+
+### By Age Group
+
+```{r mimc-by-age}
+MIMC_by_age <- ds_MIMC %>%
+  group_by(age_group) %>%
+  summarise(
+    total_trials = n(),
+    participants = n_distinct(participant_ID),
+    MIMCs        = sum(is_MIMC, na.rm = TRUE),
+    no_MIMCs     = sum(is_no_MIMC, na.rm = TRUE),
+    MIMC_rate    = round(MIMCs / total_trials * 100, 1),
+    .groups = 'drop'
+  ) %>%
+  arrange(age_group)
+
+print(MIMC_by_age)
+
+ggplot(MIMC_by_age, aes(x = age_group, y = MIMC_rate)) +
+  geom_bar(stat = "identity", fill = "seagreen") +
+  labs(title = "MIMC Rate by Age Group", x = "Age Group", y = "MIMC Rate (%)") +
+  theme_minimal()
+
+age_matrix    <- MIMC_by_age %>% select(MIMCs, no_MIMCs) %>% as.matrix()
+rownames(age_matrix) <- MIMC_by_age$age_group
+age_chi       <- chisq.test(age_matrix)
+n_total_age   <- sum(age_matrix)
+cramer_v_age  <- sqrt(age_chi$statistic /
+                        (n_total_age * (min(nrow(age_matrix), ncol(age_matrix)) - 1)))
+
+cat("\nOverall chi-square test across age groups:\n")
+cat(sprintf("  χ²(%d, N = %d) = %.2f, p %s, V = %.3f\n",
+    age_chi$parameter, n_total_age, age_chi$statistic,
+    ifelse(age_chi$p.value < .001, "< .001",
+           paste0("= ", round(age_chi$p.value, 3))),
+    cramer_v_age))
+
+cat("\nPairwise chi-square tests (Bonferroni corrected):\n")
+age_groups <- MIMC_by_age$age_group
+n_ages <- length(age_groups)
+pairwise_age <- data.frame()
+for (i in 1:(n_ages - 1)) {
+  for (j in (i + 1):n_ages) {
+    pm  <- age_matrix[c(as.character(age_groups[i]), as.character(age_groups[j])), ]
+    pc  <- chisq.test(pm)
+    pairwise_age <- rbind(pairwise_age, data.frame(
+      Group1 = age_groups[i], Group2 = age_groups[j],
+      X2 = round(pc$statistic, 3), df = pc$parameter, p_raw = pc$p.value
+    ))
+  }
+}
+pairwise_age$p_bonferroni <- p.adjust(pairwise_age$p_raw, method = "bonferroni")
+pairwise_age$p_raw        <- format.pval(pairwise_age$p_raw, digits = 3, eps = .001)
+pairwise_age$p_bonferroni <- format.pval(pairwise_age$p_bonferroni, digits = 3, eps = .001)
+print(pairwise_age, row.names = FALSE)
+```
+
+### By Clip
+
+```{r mimc-by-clip}
+MIMC_by_clip <- ds_MIMC %>%
+  group_by(full_clip_name, clip_label, genre_code) %>%
+  summarise(
+    total_trials = n(),
+    MIMCs        = sum(is_MIMC, na.rm = TRUE),
+    no_MIMCs     = sum(is_no_MIMC, na.rm = TRUE),
+    MIMC_rate    = round(MIMCs / total_trials * 100, 1),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(MIMC_rate))
+
+cat("Top 10 clips by MIMC rate:\n");  print(head(MIMC_by_clip, 10))
+cat("\nBottom 10 clips by MIMC rate:\n"); print(tail(MIMC_by_clip, 10))
+cat("\nMIMC rate across clips:\n");   print(summary(MIMC_by_clip$MIMC_rate))
+```
+
+## Cross-Tabulations
+
+### Genre × Country
+
+```{r cross-genre-country}
+MIMC_by_genre %>%
+  select(genre_code, MIMC_rate) %>%
+  left_join(
+    ds_MIMC %>%
+      group_by(genre_code, country_code) %>%
+      summarise(MIMC_rate = round(sum(is_MIMC, na.rm = TRUE) /
+                                    n() * 100, 1), .groups = 'drop') %>%
+      pivot_wider(names_from = country_code, values_from = MIMC_rate),
+    by = "genre_code"
+  ) %>%
+  print()
+```
+
+### Genre × Age Group (heatmap)
+
+```{r cross-genre-age}
+MIMC_genre_age <- ds_MIMC %>%
+  group_by(genre_code, age_group) %>%
+  summarise(
+    total_trials = n(),
+    MIMCs        = sum(is_MIMC, na.rm = TRUE),
+    MIMC_rate    = round(MIMCs / total_trials * 100, 1),
+    .groups = 'drop'
+  )
+
+ggplot(MIMC_genre_age, aes(x = age_group, y = genre_code, fill = MIMC_rate)) +
+  geom_tile() +
+  geom_text(aes(label = paste0(MIMC_rate, "%")), color = "white") +
+  scale_fill_gradient(low = "lightblue", high = "darkblue") +
+  labs(title = "MIMC Rate by Genre × Age Group",
+       x = "Age Group", y = "Genre", fill = "MIMC Rate (%)") +
+  theme_minimal()
+```
+
+## MIMC Ratings
+
+```{r ratings-prep}
+MIMC_ratings_data <- ds_MIMC %>%
+  filter(is_MIMC == 1) %>%
+  mutate(
+    Q1_music_related = as.numeric(rating_Q1_music_related.response),
+    Q2_spontaneous   = as.numeric(rating_Q2_spontaneous.response),
+    Q3_unreality     = as.numeric(rating_Q3_reality.response)
+  )
+```
+
+### Overall Ratings
+
+```{r ratings-overall}
+for (q in list(
+  list(col = "Q1_music_related", label = "Q1: Music-related",
+       desc = "not at all prompted → entirely prompted by the music (1–5)"),
+  list(col = "Q2_spontaneous",   label = "Q2: Spontaneous",
+       desc = "entirely deliberate → entirely spontaneous (1–5)"),
+  list(col = "Q3_unreality",     label = "Q3: Memory vs. Imagination",
+       desc = "entirely memory → entirely newly imagined (1–5)")
+)) {
+  vals <- MIMC_ratings_data[[q$col]]
+  cat(sprintf("\n%s\n  %s\n  Mean: %.2f | SD: %.2f | Median: %.0f | Range: %d–%d\n",
+      q$label, q$desc,
+      mean(vals, na.rm = TRUE), sd(vals, na.rm = TRUE),
+      median(vals, na.rm = TRUE),
+      min(vals, na.rm = TRUE), max(vals, na.rm = TRUE)))
+}
+```
+
+### Ratings by Genre
+
+```{r ratings-by-genre}
+ratings_by_genre <- MIMC_ratings_data %>%
+  group_by(genre_code) %>%
+  summarise(
+    n       = n(),
+    Q1_mean = round(mean(Q1_music_related, na.rm = TRUE), 2),
+    Q1_sd   = round(sd(Q1_music_related, na.rm = TRUE), 2),
+    Q2_mean = round(mean(Q2_spontaneous, na.rm = TRUE), 2),
+    Q2_sd   = round(sd(Q2_spontaneous, na.rm = TRUE), 2),
+    Q3_mean = round(mean(Q3_unreality, na.rm = TRUE), 2),
+    Q3_sd   = round(sd(Q3_unreality, na.rm = TRUE), 2),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(Q1_mean))
+
+print(ratings_by_genre)
+```
+
+### Ratings by Age Group
+
+```{r ratings-by-age}
+ratings_by_age <- MIMC_ratings_data %>%
+  group_by(age_group) %>%
+  summarise(
+    n       = n(),
+    Q1_mean = round(mean(Q1_music_related, na.rm = TRUE), 2),
+    Q2_mean = round(mean(Q2_spontaneous, na.rm = TRUE), 2),
+    Q3_mean = round(mean(Q3_unreality, na.rm = TRUE), 2),
+    .groups = 'drop'
+  ) %>%
+  arrange(age_group)
+
+ratings_by_age %>%
+  select(age_group, Q1_mean, Q2_mean, Q3_mean) %>%
+  pivot_longer(cols = c(Q1_mean, Q2_mean, Q3_mean),
+               names_to = "Rating_Type", values_to = "Mean_Rating") %>%
+  ggplot(aes(x = age_group, y = Mean_Rating,
+             colour = Rating_Type, group = Rating_Type)) +
+  geom_line(linewidth = 1) + geom_point(size = 3) +
+  scale_colour_manual(
+    values = c(Q1_mean = "steelblue", Q2_mean = "coral", Q3_mean = "seagreen"),
+    labels = c("Q1: Music-related", "Q2: Spontaneous", "Q3: Imagination")
+  ) +
+  labs(title = "MIMC Ratings Across Age Groups",
+       x = "Age Group", y = "Mean Rating", colour = "Rating") +
+  theme_minimal() + theme(legend.position = "bottom")
+```
+
+### Ratings by Country
+
+```{r ratings-by-country}
+MIMC_ratings_data %>%
+  group_by(country_code) %>%
+  summarise(
+    n       = n(),
+    Q1_mean = round(mean(Q1_music_related, na.rm = TRUE), 2),
+    Q1_sd   = round(sd(Q1_music_related, na.rm = TRUE), 2),
+    Q2_mean = round(mean(Q2_spontaneous, na.rm = TRUE), 2),
+    Q2_sd   = round(sd(Q2_spontaneous, na.rm = TRUE), 2),
+    Q3_mean = round(mean(Q3_unreality, na.rm = TRUE), 2),
+    Q3_sd   = round(sd(Q3_unreality, na.rm = TRUE), 2),
+    .groups = 'drop'
+  ) %>%
+  print()
+```
+
+---
+
+# Part 2 — Quantised QDA Analysis
+
+## Data Preparation
+
+```{r qda-prep}
+# Work from the merged dataset, keeping only MIMC trials (rating_Q3 != 0)
+ds <- ds_full %>%
+  filter(rating_Q3_reality.response != "0") %>%
+  # ── Drop columns not needed for QDA analyses ────────────────────────────────
+  select(-c(Document.name, Created.by, Created, Modified.by, Modified,
+            demographics.headphones, invalid,
+            demographics.livingCountry, demographics.birthCountry,
+            demographics.nativeLanguage, demographics.otherLanguage,
+            demographics.otherLanguageText, demographics.gender,
+            demographics.hearingImpariments, demographics.hearingImpairmentsText)
+  ) %>%
+  # ── Rename for readability ──────────────────────────────────────────────────
+  rename(
+    SETTINGS_                                = X.Settings.,
+    Natural_World_                           = X.Natural.World.,
+    Sky_and_Space                            = Sky.and.Space,
+    Water_Features                           = Water.Features,
+    Fictional_and_Spiritual_Settings         = Fictional.and.Spiritual.Settings,
+    Societal_Places                          = Societal.Places,
+    Named_Regional_Places                    = Named.Regional.Places,
+    Scene_Qualities                          = Scene.Qualities,
+    Spatial_Orientation                      = Spatial.Orientation,
+    CHARACTERS_                              = Characters,
+    Character_Descriptors_                   = X.Character.Descriptors.,
+    Outfit_Details_                          = X.Outfit.Details.,
+    Outfit_Descriptors                       = Outfit.Descriptors,
+    Professions_and_Pursuits                 = Professions.and.Pursuits,
+    Music_related_Professions_and_Pursuits   = Music.related.Professions.and.Pursuits,
+    Social_Collectives                       = Social.Collectives,
+    Named_Figures_                           = X.Named.Figures.,
+    Fictional_Characters                     = Fictional.Characters,
+    Historical_and_Mythical_Figures          = Historical.and.Mythical.Figures,
+    Performers_and_Entertainers              = Performers.and.Entertainers,
+    Social_Presence_                         = X.Social.Presence.,
+    Body_Parts                               = Body.Parts,
+    OBJECTS_and_THINGS_                      = X.Objects...Things.,
+    Everyday_Objects                         = Everyday.Objects,
+    Materials_and_Surfaces                   = Materials.and.Surfaces,
+    Object_Qualities                         = Object.Qualities,
+    Commerce_and_Organisations               = Commerce.and.Organisations,
+    ACTIONS_                                 = X.Actions.,
+    Agentic_Actions_                         = X.Agentic.Actions.,
+    Directed_Movement                        = Directed.Movement,
+    Daily_life                               = Daily.life,
+    Music_linked_Movement                    = Music.linked.Movement,
+    Creating_and_Performing                  = Creating.and.Performing,
+    Relational_and_Social_Acts               = Relational.and.Social,
+    Conflict_and_Wrongdoing                  = Conflict.and.Wrongdoing,
+    Processes_and_States_                    = X.Processes.and.States.,
+    Perceptual_Acts                          = Perceptual.acts,
+    Non_directional_Motions                  = Non.directional.Motions,
+    Rest_and_Leisure                         = Rest.and.Leisure,
+    Transforming_and_Learning                = Transforming.and.Learning,
+    Waiting_and_Anticipating                 = Waiting.and.Anticipating,
+    Action_Modifiers_                        = X.Action.Modifiers.,
+    MUSIC_and_SOUNDS_                        = X.Music...Sounds.,
+    Instruments_Ensembles_and_Imitations     = Instruments..Ensembles..and.Imitations,
+    Music_Use_and_Function                   = Music.Use.and.Function,
+    Sound_Qualities                          = Sound.Qualities,
+    Music_Genre_Cultural_and_Stylistic_Labels = Music.Genre..Cultural..and.Stylistic.Labels,
+    Technical_and_Structural_Music_Elements  = Technical.and.Structural.Music.Elements,
+    Playback_and_Listening_Devices           = Playback.and.Listening.Devices,
+    Named_Artists_and_Musicians              = Named.Artists.and.Musicians,
+    Named_Songs_and_Lyrics                   = Named.Songs.and.Lyrics,
+    Sounds_and_Sound_Effects                 = Sounds.and.Sound.Effects,
+    MEDIA_ART_and_TECHNOLOGY_                = X.Media..Art....Technology.,
+    Media_Formats                            = Media.Formats,
+    Media_Genres_and_Styles                  = Media.Genres.and.Styles,
+    Media_Packaging_Structures               = Media.Packaging.Structures,
+    Media_Techniques_and_Effects             = Media.Techniques.and.Effects,
+    Music_and_Sound_in_Media                 = Music.and.Sound.in.Media,
+    Media_Companies_and_Devices              = Media.Companies.and.Devices,
+    Digital_Platforms_and_Applications       = Digital.Platforms.and.Applications,
+    Named_Media_References                   = Named.Media.References,
+    CHRONOLOGY_and_EVENTS_                   = X.Chronology...Events.,
+    Events_and_Occasions                     = Events.and.Occasions,
+    Historical_Events_and_Periods            = Historical.Events.and.Periods,
+    Narrative_Progression                    = Narrative.Progression,
+    Passage_and_Repetition_of_Time           = Passage.and.Repetition.of.Time,
+    Seasons_and_Time                         = Seasons.and.Time,
+    SYMBOLIC_and_SENSORY_REPRESENTATIONS_    = X.Symbolic...Sensory.Representations.,
+    Sensory_Details_                         = X.Sensory.Details.,
+    Visual_Details_                          = X.Visual.Details.,
+    Vantage_Point                            = Vantage.Point,
+    Oddities_Effects_Shapes_Patterns         = Oddities..Effects..Shapes..Patterns,
+    Bodily_Sensation                         = Bodily.Sensation,
+    Conceptual_and_Metaphorical_References   = Conceptual.and.Metaphorical.References,
+    SUBJECTIVE_and_PERSONAL_EXPERIENCE_      = X.Subjective...Personal.Experience.,
+    Emotions_and_Affective_States            = Emotions.and.Affective.States,
+    Opinions_and_Preferences                 = Opinions.and.Preferences,
+    Personal_Significance                    = Personal.Significance,
+    Personal_Time_linked_Connections         = Personal.Time.linked.Connections
+  )
+
+cat("QDA dataset (MIMC-only, post-merge, post-filter):", nrow(ds), "trials\n")
+```
+
+## Hierarchical Code Summation
+
+```{r hierarchy-sums}
+ds <- ds %>%
+  mutate(
+    # ── NARRATIONAL: Level 1 ──────────────────────────────────────────────────
+    Natural_World_ = rowSums(across(c(Creatures, Terrains, Vegetation,
+                                      Sky_and_Space, Water_Features, Weather)), na.rm = TRUE),
+    Outfit_Details_ = rowSums(across(c(Accessories, Hair, Outfit_Descriptors)), na.rm = TRUE),
+    Named_Figures_  = rowSums(across(c(Creators, Fictional_Characters,
+                                       Historical_and_Mythical_Figures,
+                                       Performers_and_Entertainers)), na.rm = TRUE),
+    Social_Presence_ = rowSums(across(c(Solitude, Dyads, Groups)), na.rm = TRUE),
+    Agentic_Actions_ = rowSums(across(c(Directed_Movement, Daily_life,
+                                        Music_linked_Movement, Sports,
+                                        Creating_and_Performing, Relational_and_Social_Acts,
+                                        Consuming, Conflict_and_Wrongdoing)), na.rm = TRUE),
+    Processes_and_States_ = rowSums(across(c(Perceptual_Acts, Non_directional_Motions,
+                                             Rest_and_Leisure, Transforming_and_Learning,
+                                             Waiting_and_Anticipating)), na.rm = TRUE),
+    Action_Modifiers_ = rowSums(across(c(Speed, Characterisation)), na.rm = TRUE),
+    # ── NARRATIONAL: Level 2 ──────────────────────────────────────────────────
+    SETTINGS_ = rowSums(across(c(Natural_World_, Fictional_and_Spiritual_Settings,
+                                 Societal_Places, Named_Regional_Places,
+                                 Scene_Qualities, Spatial_Orientation)), na.rm = TRUE),
+    Character_Descriptors_ = rowSums(across(c(Outfit_Details_, Identity,
+                                              Professions_and_Pursuits,
+                                              Music_related_Professions_and_Pursuits,
+                                              Relations, Archetypes,
+                                              Social_Collectives, Traits)), na.rm = TRUE),
+    ACTIONS_ = rowSums(across(c(Agentic_Actions_, Processes_and_States_,
+                                Action_Modifiers_)), na.rm = TRUE),
+    # ── NARRATIONAL: Level 3 ──────────────────────────────────────────────────
+    CHARACTERS_ = rowSums(across(c(Body_Parts, Character_Descriptors_,
+                                   Named_Figures_, Social_Presence_)), na.rm = TRUE),
+    OBJECTS_and_THINGS_ = rowSums(across(c(Consumables, Everyday_Objects,
+                                           Materials_and_Surfaces, Object_Qualities,
+                                           Commerce_and_Organisations, Transport)), na.rm = TRUE),
+    # ── NARRATIONAL: Theme ────────────────────────────────────────────────────
+    NARRATIONAL = rowSums(across(c(SETTINGS_, CHARACTERS_,
+                                   OBJECTS_and_THINGS_, ACTIONS_)), na.rm = TRUE),
+
+    # ── REFERENTIAL: Level 1 ─────────────────────────────────────────────────
+    MUSIC_and_SOUNDS_ = rowSums(across(c(Instruments_Ensembles_and_Imitations,
+                                         Music_Use_and_Function, Sound_Qualities,
+                                         Music_Genre_Cultural_and_Stylistic_Labels,
+                                         Technical_and_Structural_Music_Elements,
+                                         Playback_and_Listening_Devices,
+                                         Named_Artists_and_Musicians, Named_Songs_and_Lyrics,
+                                         Sounds_and_Sound_Effects)), na.rm = TRUE),
+    MEDIA_ART_and_TECHNOLOGY_ = rowSums(across(c(Digital_Platforms_and_Applications,
+                                                  Media_Companies_and_Devices,
+                                                  Media_Formats, Media_Genres_and_Styles,
+                                                  Media_Packaging_Structures,
+                                                  Media_Techniques_and_Effects,
+                                                  Music_and_Sound_in_Media,
+                                                  Named_Media_References)), na.rm = TRUE),
+    CHRONOLOGY_and_EVENTS_ = rowSums(across(c(Events_and_Occasions,
+                                               Historical_Events_and_Periods,
+                                               Narrative_Progression,
+                                               Passage_and_Repetition_of_Time,
+                                               Seasons_and_Time)), na.rm = TRUE),
+    # ── REFERENTIAL: Theme ────────────────────────────────────────────────────
+    REFERENTIAL = rowSums(across(c(MUSIC_and_SOUNDS_, MEDIA_ART_and_TECHNOLOGY_,
+                                   CHRONOLOGY_and_EVENTS_)), na.rm = TRUE),
+
+    # ── EXPERIENTIAL: Level 1 ────────────────────────────────────────────────
+    Visual_Details_ = rowSums(across(c(Colour, Illumination, Text, Vantage_Point,
+                                       Oddities_Effects_Shapes_Patterns)), na.rm = TRUE),
+    SUBJECTIVE_and_PERSONAL_EXPERIENCE_ = rowSums(across(c(Emotions_and_Affective_States,
+                                                            Opinions_and_Preferences,
+                                                            Personal_Significance,
+                                                            Personal_Time_linked_Connections)),
+                                                  na.rm = TRUE),
+    # ── EXPERIENTIAL: Level 2 ────────────────────────────────────────────────
+    Sensory_Details_ = rowSums(across(c(Visual_Details_, Smell, Bodily_Sensation)),
+                               na.rm = TRUE),
+    # ── EXPERIENTIAL: Level 3 ────────────────────────────────────────────────
+    SYMBOLIC_and_SENSORY_REPRESENTATIONS_ = rowSums(
+      across(c(Sensory_Details_, Conceptual_and_Metaphorical_References)), na.rm = TRUE),
+    # ── EXPERIENTIAL: Theme ───────────────────────────────────────────────────
+    EXPERIENTIAL = rowSums(across(c(SYMBOLIC_and_SENSORY_REPRESENTATIONS_,
+                                    SUBJECTIVE_and_PERSONAL_EXPERIENCE_)), na.rm = TRUE)
+  )
+
+cat("Hierarchical summation complete\n")
+```
+
+## Binarise & Filter
+
+````{r binarise-filter}
+ds <- ds %>%
+  mutate(
+    # ── NARRATIONAL ───────────────────────────────────────────────────────────
+    NARRATIONAL_bin                  = as.integer(NARRATIONAL > 0),
+      # 1.1 Settings
+      SETTINGS_bin                   = as.integer(SETTINGS_ > 0),
+        NATURAL_WORLD_bin            = as.integer(Natural_World_ > 0),
+        FICTIONAL_SPIRITUAL_bin      = as.integer(Fictional_and_Spiritual_Settings > 0),
+        SOCIETAL_PLACES_bin          = as.integer(Societal_Places > 0),
+        NAMED_REGIONAL_PLACES_bin    = as.integer(Named_Regional_Places > 0),
+        SCENE_QUALITIES_bin          = as.integer(Scene_Qualities > 0),
+        SPATIAL_ORIENTATION_bin      = as.integer(Spatial_Orientation > 0),
+      # 1.2 Characters
+      CHARACTERS_bin                 = as.integer(CHARACTERS_ > 0),
+        CHARACTER_DESCRIPTORS_bin    = as.integer(Character_Descriptors_ > 0),
+        NAMED_FIGURES_bin            = as.integer(Named_Figures_ > 0),
+        SOCIAL_PRESENCE_bin          = as.integer(Social_Presence_ > 0),
+        BODY_PARTS_bin               = as.integer(Body_Parts > 0),
+      # 1.3 Objects & Things
+      OBJECTS_THINGS_bin             = as.integer(OBJECTS_and_THINGS_ > 0),
+        CONSUMABLES_bin              = as.integer(Consumables > 0),
+        EVERYDAY_OBJECTS_bin         = as.integer(Everyday_Objects > 0),
+        TRANSPORT_bin                = as.integer(Transport > 0),
+        COMMERCE_ORGANISATIONS_bin   = as.integer(Commerce_and_Organisations > 0),
+        MATERIALS_SURFACES_bin       = as.integer(Materials_and_Surfaces > 0),
+        OBJECT_QUALITIES_bin         = as.integer(Object_Qualities > 0),
+      # 1.4 Actions
+      ACTIONS_bin                    = as.integer(ACTIONS_ > 0),
+        AGENTIC_ACTIONS_bin          = as.integer(Agentic_Actions_ > 0),
+        PROCESSES_STATES_bin         = as.integer(Processes_and_States_ > 0),
+        ACTION_MODIFIERS_bin         = as.integer(Action_Modifiers_ > 0),
+
+    # ── REFERENTIAL ───────────────────────────────────────────────────────────
+    REFERENTIAL_bin                  = as.integer(REFERENTIAL > 0),
+      # 2.1 Music & Sounds
+      MUSIC_SOUNDS_bin               = as.integer(MUSIC_and_SOUNDS_ > 0),
+        INSTRUMENTS_bin              = as.integer(Instruments_Ensembles_and_Imitations > 0),
+        MUSIC_USE_FUNCTION_bin       = as.integer(Music_Use_and_Function > 0),
+        SOUND_QUALITIES_bin          = as.integer(Sound_Qualities > 0),
+        MUSIC_GENRE_LABELS_bin       = as.integer(Music_Genre_Cultural_and_Stylistic_Labels > 0),
+        TECHNICAL_STRUCTURAL_bin     = as.integer(Technical_and_Structural_Music_Elements > 0),
+        PLAYBACK_DEVICES_bin         = as.integer(Playback_and_Listening_Devices > 0),
+        NAMED_ARTISTS_bin            = as.integer(Named_Artists_and_Musicians > 0),
+        NAMED_SONGS_bin              = as.integer(Named_Songs_and_Lyrics > 0),
+        SOUNDS_EFFECTS_bin           = as.integer(Sounds_and_Sound_Effects > 0),
+      # 2.2 Media, Art, & Technology
+      MEDIA_ART_TECHNOLOGY_bin       = as.integer(MEDIA_ART_and_TECHNOLOGY_ > 0),
+        MEDIA_FORMATS_bin            = as.integer(Media_Formats > 0),
+        MEDIA_GENRES_STYLES_bin      = as.integer(Media_Genres_and_Styles > 0),
+        MEDIA_PACKAGING_bin          = as.integer(Media_Packaging_Structures > 0),
+        MEDIA_TECHNIQUES_bin         = as.integer(Media_Techniques_and_Effects > 0),
+        MUSIC_IN_MEDIA_bin           = as.integer(Music_and_Sound_in_Media > 0),
+        MEDIA_COMPANIES_bin          = as.integer(Media_Companies_and_Devices > 0),
+        DIGITAL_PLATFORMS_bin        = as.integer(Digital_Platforms_and_Applications > 0),
+        NAMED_MEDIA_bin              = as.integer(Named_Media_References > 0),
+      # 2.3 Chronology & Events
+      CHRONOLOGY_EVENTS_bin          = as.integer(CHRONOLOGY_and_EVENTS_ > 0),
+        EVENTS_OCCASIONS_bin         = as.integer(Events_and_Occasions > 0),
+        HISTORICAL_EVENTS_bin        = as.integer(Historical_Events_and_Periods > 0),
+        NARRATIVE_PROGRESSION_bin    = as.integer(Narrative_Progression > 0),
+        PASSAGE_TIME_bin             = as.integer(Passage_and_Repetition_of_Time > 0),
+        SEASONS_TIME_bin             = as.integer(Seasons_and_Time > 0),
+
+    # ── EXPERIENTIAL ──────────────────────────────────────────────────────────
+    EXPERIENTIAL_bin                 = as.integer(EXPERIENTIAL > 0),
+      # 3.1 Symbolic & Sensory
+      SYMBOLIC_SENSORY_bin           = as.integer(SYMBOLIC_and_SENSORY_REPRESENTATIONS_ > 0),
+        SENSORY_DETAILS_bin          = as.integer(Sensory_Details_ > 0),
+          VISUAL_DETAILS_bin         = as.integer(Visual_Details_ > 0),
+        CONCEPTUAL_METAPHORICAL_bin  = as.integer(Conceptual_and_Metaphorical_References > 0),
+      # 3.2 Subjective & Personal
+      SUBJECTIVE_PERSONAL_bin        = as.integer(SUBJECTIVE_and_PERSONAL_EXPERIENCE_ > 0),
+        EMOTIONS_AFFECTIVE_bin       = as.integer(Emotions_and_Affective_States > 0),
+        OPINIONS_PREFERENCES_bin     = as.integer(Opinions_and_Preferences > 0),
+        PERSONAL_SIGNIFICANCE_bin    = as.integer(Personal_Significance > 0),
+        PERSONAL_TIME_LINKED_bin     = as.integer(Personal_Time_linked_Connections > 0)
+  )
+
+# Remove trials with no codes at all
+ds <- ds %>%
+  filter(!(NARRATIONAL_bin == 0 & REFERENTIAL_bin == 0 & EXPERIENTIAL_bin == 0))
+
+cat("Trials with at least one theme coded:", nrow(ds), "\n")
+````
+
+## Dataset Coverage
+
+Percentage of trials in which each category was coded (present ≥ 1 time).
+
+```{r dataset-coverage}
+coverage <- ds %>%
+  summarise(
+    # ── Themes ────────────────────────────────────────────────────────────────
+    NARRATIONAL                = mean(NARRATIONAL_bin)  * 100,
+    REFERENTIAL                = mean(REFERENTIAL_bin)  * 100,
+    EXPERIENTIAL               = mean(EXPERIENTIAL_bin) * 100,
+    # ── 1.1 Settings & second-level ───────────────────────────────────────────
+    Settings                   = mean(SETTINGS_bin)              * 100,
+    Natural_World              = mean(NATURAL_WORLD_bin)          * 100,
+    Fictional_Spiritual        = mean(FICTIONAL_SPIRITUAL_bin)    * 100,
+    Societal_Places            = mean(SOCIETAL_PLACES_bin)        * 100,
+    Named_Regional_Places      = mean(NAMED_REGIONAL_PLACES_bin)  * 100,
+    Scene_Qualities            = mean(SCENE_QUALITIES_bin)        * 100,
+    Spatial_Orientation        = mean(SPATIAL_ORIENTATION_bin)    * 100,
+    # ── 1.2 Characters & second-level ─────────────────────────────────────────
+    Characters                 = mean(CHARACTERS_bin)             * 100,
+    Character_Descriptors      = mean(CHARACTER_DESCRIPTORS_bin)  * 100,
+    Named_Figures              = mean(NAMED_FIGURES_bin)          * 100,
+    Social_Presence            = mean(SOCIAL_PRESENCE_bin)        * 100,
+    Body_Parts                 = mean(BODY_PARTS_bin)             * 100,
+    # ── 1.3 Objects & Things & second-level ───────────────────────────────────
+    Objects_Things             = mean(OBJECTS_THINGS_bin)         * 100,
+    Consumables                = mean(CONSUMABLES_bin)            * 100,
+    Everyday_Objects           = mean(EVERYDAY_OBJECTS_bin)       * 100,
+    Transport                  = mean(TRANSPORT_bin)              * 100,
+    Commerce_Organisations     = mean(COMMERCE_ORGANISATIONS_bin) * 100,
+    Materials_Surfaces         = mean(MATERIALS_SURFACES_bin)     * 100,
+    Object_Qualities           = mean(OBJECT_QUALITIES_bin)       * 100,
+    # ── 1.4 Actions & second-level ────────────────────────────────────────────
+    Actions                    = mean(ACTIONS_bin)                * 100,
+    Agentic_Actions            = mean(AGENTIC_ACTIONS_bin)        * 100,
+    Processes_States           = mean(PROCESSES_STATES_bin)       * 100,
+    Action_Modifiers           = mean(ACTION_MODIFIERS_bin)       * 100,
+    # ── 2.1 Music & Sounds & second-level ─────────────────────────────────────
+    Music_Sounds               = mean(MUSIC_SOUNDS_bin)           * 100,
+    Instruments                = mean(INSTRUMENTS_bin)            * 100,
+    Music_Use_Function         = mean(MUSIC_USE_FUNCTION_bin)     * 100,
+    Sound_Qualities            = mean(SOUND_QUALITIES_bin)        * 100,
+    Music_Genre_Labels         = mean(MUSIC_GENRE_LABELS_bin)     * 100,
+    Technical_Structural       = mean(TECHNICAL_STRUCTURAL_bin)   * 100,
+    Playback_Devices           = mean(PLAYBACK_DEVICES_bin)       * 100,
+    Named_Artists              = mean(NAMED_ARTISTS_bin)          * 100,
+    Named_Songs                = mean(NAMED_SONGS_bin)            * 100,
+    Sounds_Effects             = mean(SOUNDS_EFFECTS_bin)         * 100,
+    # ── 2.2 Media, Art, & Technology & second-level ───────────────────────────
+    Media_Art_Tech             = mean(MEDIA_ART_TECHNOLOGY_bin)   * 100,
+    Media_Formats              = mean(MEDIA_FORMATS_bin)          * 100,
+    Media_Genres_Styles        = mean(MEDIA_GENRES_STYLES_bin)    * 100,
+    Media_Packaging            = mean(MEDIA_PACKAGING_bin)        * 100,
+    Media_Techniques           = mean(MEDIA_TECHNIQUES_bin)       * 100,
+    Music_in_Media             = mean(MUSIC_IN_MEDIA_bin)         * 100,
+    Media_Companies            = mean(MEDIA_COMPANIES_bin)        * 100,
+    Digital_Platforms          = mean(DIGITAL_PLATFORMS_bin)      * 100,
+    Named_Media                = mean(NAMED_MEDIA_bin)            * 100,
+    # ── 2.3 Chronology & Events & second-level ────────────────────────────────
+    Chronology_Events          = mean(CHRONOLOGY_EVENTS_bin)      * 100,
+    Events_Occasions           = mean(EVENTS_OCCASIONS_bin)       * 100,
+    Historical_Events          = mean(HISTORICAL_EVENTS_bin)      * 100,
+    Narrative_Progression      = mean(NARRATIVE_PROGRESSION_bin)  * 100,
+    Passage_Time               = mean(PASSAGE_TIME_bin)           * 100,
+    Seasons_Time               = mean(SEASONS_TIME_bin)           * 100,
+    # ── 3.1 Symbolic & Sensory & second-level ─────────────────────────────────
+    Symbolic_Sensory           = mean(SYMBOLIC_SENSORY_bin)           * 100,
+    Sensory_Details            = mean(SENSORY_DETAILS_bin)            * 100,
+    Visual_Details             = mean(VISUAL_DETAILS_bin)             * 100,
+    Conceptual_Metaphorical    = mean(CONCEPTUAL_METAPHORICAL_bin)    * 100,
+    # ── 3.2 Subjective & Personal & second-level ──────────────────────────────
+    Subjective_Personal        = mean(SUBJECTIVE_PERSONAL_bin)        * 100,
+    Emotions_Affective         = mean(EMOTIONS_AFFECTIVE_bin)         * 100,
+    Opinions_Preferences       = mean(OPINIONS_PREFERENCES_bin)       * 100,
+    Personal_Significance      = mean(PERSONAL_SIGNIFICANCE_bin)      * 100,
+    Personal_Time_Linked       = mean(PERSONAL_TIME_LINKED_bin)       * 100
+  ) %>%
+  pivot_longer(cols = everything(),
+               names_to = "Category", values_to = "Coverage_pct") %>%
+  mutate(
+    Level = case_when(
+      Category %in% c("NARRATIONAL", "REFERENTIAL", "EXPERIENTIAL")
+        ~ "1 - Theme",
+      Category %in% c("Settings", "Characters", "Objects_Things", "Actions",
+                      "Music_Sounds", "Media_Art_Tech", "Chronology_Events",
+                      "Symbolic_Sensory", "Subjective_Personal")
+        ~ "2 - Top-level",
+      TRUE
+        ~ "3 - Second-level"
+    ),
+    Parent = case_when(
+      Category %in% c("Settings", "Characters", "Objects_Things", "Actions")
+        ~ "NARRATIONAL",
+      Category %in% c("Natural_World", "Fictional_Spiritual", "Societal_Places",
+                      "Named_Regional_Places", "Scene_Qualities", "Spatial_Orientation")
+        ~ "Settings",
+      Category %in% c("Character_Descriptors", "Named_Figures",
+                      "Social_Presence", "Body_Parts")
+        ~ "Characters",
+      Category %in% c("Consumables", "Everyday_Objects", "Transport",
+                      "Commerce_Organisations", "Materials_Surfaces", "Object_Qualities")
+        ~ "Objects_Things",
+      Category %in% c("Agentic_Actions", "Processes_States", "Action_Modifiers")
+        ~ "Actions",
+      Category %in% c("Music_Sounds", "Media_Art_Tech", "Chronology_Events")
+        ~ "REFERENTIAL",
+      Category %in% c("Instruments", "Music_Use_Function", "Sound_Qualities",
+                      "Music_Genre_Labels", "Technical_Structural", "Playback_Devices",
+                      "Named_Artists", "Named_Songs", "Sounds_Effects")
+        ~ "Music_Sounds",
+      Category %in% c("Media_Formats", "Media_Genres_Styles", "Media_Packaging",
+                      "Media_Techniques", "Music_in_Media", "Media_Companies",
+                      "Digital_Platforms", "Named_Media")
+        ~ "Media_Art_Tech",
+      Category %in% c("Events_Occasions", "Historical_Events", "Narrative_Progression",
+                      "Passage_Time", "Seasons_Time")
+        ~ "Chronology_Events",
+      Category %in% c("Symbolic_Sensory", "Subjective_Personal")
+        ~ "EXPERIENTIAL",
+      Category %in% c("Sensory_Details", "Visual_Details", "Conceptual_Metaphorical")
+        ~ "Symbolic_Sensory",
+      Category %in% c("Emotions_Affective", "Opinions_Preferences",
+                      "Personal_Significance", "Personal_Time_Linked")
+        ~ "Subjective_Personal",
+      TRUE ~ NA_character_
+    ),
+    Coverage_pct = round(Coverage_pct, 1)
+  ) %>%
+  arrange(Level, Parent, desc(Coverage_pct))
+
+print(coverage, n = Inf)
+```
+
+## MIMC Code Structure Hierarchy
+
+Interactive diagonal network — hover over nodes to explore the hierarchy.
+
+```{r diagonal-network}
+mimc_tree <- list(
+  name = "MIMC",
+  children = list(
+
+    list(name = "Narrational", children = list(
+
+      list(name = "Settings", children = list(
+        list(name = "Natural World", children = list(
+          list(name = "Creatures"), list(name = "Terrains"), list(name = "Vegetation"),
+          list(name = "Sky and Space"), list(name = "Water Features"), list(name = "Weather"))),
+        list(name = "Fictional & Spiritual Settings"),
+        list(name = "Societal Places"),
+        list(name = "Named Regional Places"),
+        list(name = "Scene Qualities"),
+        list(name = "Spatial Orientation"))),
+
+      list(name = "Characters", children = list(
+        list(name = "Character Descriptors", children = list(
+          list(name = "Outfit Details", children = list(
+            list(name = "Accessories"), list(name = "Hair"), list(name = "Outfit Descriptors"))),
+          list(name = "Identity"),
+          list(name = "Professions & Pursuits", children = list(
+            list(name = "Music-related Professions & Pursuits"))),
+          list(name = "Relations"),
+          list(name = "Archetypes"),
+          list(name = "Social Collectives"),
+          list(name = "Traits"))),
+        list(name = "Named Figures", children = list(
+          list(name = "Creators"), list(name = "Fictional Characters"),
+          list(name = "Historical & Mythical Figures"), list(name = "Performers & Entertainers"))),
+        list(name = "Social Presence", children = list(
+          list(name = "Solitude"), list(name = "Dyads"), list(name = "Groups"))),
+        list(name = "Body Parts"))),
+
+      list(name = "Objects & Things", children = list(
+        list(name = "Consumables"), list(name = "Everyday Objects"), list(name = "Transport"),
+        list(name = "Commerce & Organisations"), list(name = "Materials & Surfaces"),
+        list(name = "Object Qualities"))),
+
+      list(name = "Actions", children = list(
+        list(name = "Agentic Actions", children = list(
+          list(name = "Directed Movement"), list(name = "Daily Life"),
+          list(name = "Music-linked Movement"), list(name = "Sports"),
+          list(name = "Creating & Performing"), list(name = "Relational & Social"),
+          list(name = "Consuming"), list(name = "Conflict & Wrongdoing"))),
+        list(name = "Processes & States", children = list(
+          list(name = "Perceptual Acts"), list(name = "Non-directional Motions"),
+          list(name = "Rest & Leisure"), list(name = "Transforming & Learning"),
+          list(name = "Waiting & Anticipating"))),
+        list(name = "Action Modifiers", children = list(
+          list(name = "Speed"), list(name = "Characterisation")))))
+    )),
+
+    list(name = "Referential", children = list(
+
+      list(name = "Music & Sounds", children = list(
+        list(name = "Instruments, Ensembles & Imitations"),
+        list(name = "Music Use & Function"),
+        list(name = "Sound Qualities", children = list(
+          list(name = "Genre, Cultural & Stylistic Labels"),
+          list(name = "Technical & Structural Elements"))),
+        list(name = "Playback & Listening Devices"),
+        list(name = "Named Artists & Musicians"),
+        list(name = "Named Songs & Lyrics"),
+        list(name = "Sounds & Sound Effects"))),
+
+      list(name = "Media, Art, & Technology", children = list(
+        list(name = "Media Formats"), list(name = "Media Genres & Styles"),
+        list(name = "Media Packaging Structures"), list(name = "Media Techniques & Effects"),
+        list(name = "Music & Sound in Media"), list(name = "Media Companies & Devices"),
+        list(name = "Digital Platforms & Applications"), list(name = "Named Media References"))),
+
+      list(name = "Chronology & Events", children = list(
+        list(name = "Events & Occasions"), list(name = "Historical Events & Periods"),
+        list(name = "Narrative Progression"), list(name = "Passage & Repetition of Time"),
+        list(name = "Seasons & Time")))
+    )),
+
+    list(name = "Experiential", children = list(
+
+      list(name = "Symbolic & Sensory", children = list(
+        list(name = "Sensory Details", children = list(
+          list(name = "Visual Details", children = list(
+            list(name = "Colour"), list(name = "Illumination"), list(name = "Text"),
+            list(name = "Vantage Point"), list(name = "Oddities, Effects, Shapes, Patterns"))),
+          list(name = "Smell"),
+          list(name = "Bodily Sensation"))),
+        list(name = "Conceptual & Metaphorical References"))),
+
+      list(name = "Subjective & Personal", children = list(
+        list(name = "Emotions & Affective States"), list(name = "Opinions & Preferences"),
+        list(name = "Personal Significance"), list(name = "Personal Time-linked Connections")))
+    ))
+
+  )
+)
+
+diagonalNetwork(
+  List = mimc_tree, fontSize = 10, opacity = 0.9,
+  linkColour = "#cccccc", nodeColour = "#000000",
+  textColour = "#333333", nodeStroke = "white"
+) %>%
+  onRender('
+    function(el, x) {
+      var narrational = ["Narrational",
+        "Settings",
+          "Natural World", "Creatures", "Terrains", "Vegetation",
+            "Sky and Space", "Water Features", "Weather",
+          "Fictional & Spiritual Settings", "Societal Places",
+          "Named Regional Places", "Scene Qualities", "Spatial Orientation",
+        "Characters",
+          "Character Descriptors",
+            "Outfit Details", "Accessories", "Hair", "Outfit Descriptors",
+            "Identity",
+            "Professions & Pursuits", "Music-related Professions & Pursuits",
+            "Relations", "Archetypes", "Social Collectives", "Traits",
+          "Named Figures",
+            "Creators", "Fictional Characters",
+            "Historical & Mythical Figures", "Performers & Entertainers",
+          "Social Presence", "Solitude", "Dyads", "Groups",
+          "Body Parts",
+        "Objects & Things",
+          "Consumables", "Everyday Objects", "Transport",
+          "Commerce & Organisations", "Materials & Surfaces", "Object Qualities",
+        "Actions",
+          "Agentic Actions",
+            "Directed Movement", "Daily Life", "Music-linked Movement", "Sports",
+            "Creating & Performing", "Relational & Social", "Consuming",
+            "Conflict & Wrongdoing",
+          "Processes & States",
+            "Perceptual Acts", "Non-directional Motions", "Rest & Leisure",
+            "Transforming & Learning", "Waiting & Anticipating",
+          "Action Modifiers", "Speed", "Characterisation"];
+
+      var referential = ["Referential",
+        "Music & Sounds",
+          "Instruments, Ensembles & Imitations", "Music Use & Function",
+          "Sound Qualities",
+            "Genre, Cultural & Stylistic Labels", "Technical & Structural Elements",
+          "Playback & Listening Devices", "Named Artists & Musicians",
+          "Named Songs & Lyrics", "Sounds & Sound Effects",
+        "Media, Art, & Technology",
+          "Media Formats", "Media Genres & Styles", "Media Packaging Structures",
+          "Media Techniques & Effects", "Music & Sound in Media",
+          "Media Companies & Devices", "Digital Platforms & Applications",
+          "Named Media References",
+        "Chronology & Events",
+          "Events & Occasions", "Historical Events & Periods",
+          "Narrative Progression", "Passage & Repetition of Time", "Seasons & Time"];
+
+      var experiential = ["Experiential",
+        "Symbolic & Sensory",
+          "Sensory Details",
+            "Visual Details",
+              "Colour", "Illumination", "Text", "Vantage Point",
+              "Oddities, Effects, Shapes, Patterns",
+            "Smell", "Bodily Sensation",
+          "Conceptual & Metaphorical References",
+        "Subjective & Personal",
+          "Emotions & Affective States", "Opinions & Preferences",
+          "Personal Significance", "Personal Time-linked Connections"];
+
+      d3.select(el).selectAll("circle")
+        .style("fill", function(d) {
+          var name = d.data ? d.data.name : d.name;
+          if (name === "MIMC")                    return "#555555";
+          if (narrational.indexOf(name)  > -1)    return "#940e8c";
+          if (referential.indexOf(name)  > -1)    return "#4b9c00";
+          if (experiential.indexOf(name) > -1)    return "#585ccc";
+          return "#000000";
+        });
+    }
+  ')
+```
+
+## Co-occurrence Analyses
+
+### Combined Matrix (Jaccard + Raw)
+
+Upper purple triangle: Jaccard similarity | Lower green triangle: raw co-occurrence proportion.
+Grey tiles = diagonal or parent–child comparisons.
+
+```{r cooccurrence-matrix, fig.width=8, fig.height=6}
+bin_cols <- c(
+  "NARRATIONAL_bin", "REFERENTIAL_bin", "EXPERIENTIAL_bin",
+  "SETTINGS_bin", "CHARACTERS_bin", "OBJECTS_THINGS_bin", "ACTIONS_bin",
+  "MUSIC_SOUNDS_bin", "MEDIA_ART_TECHNOLOGY_bin", "CHRONOLOGY_EVENTS_bin",
+  "SYMBOLIC_SENSORY_bin", "SUBJECTIVE_PERSONAL_bin"
+)
+bin_matrix <- as.matrix(ds[, bin_cols])
+n          <- length(bin_cols)
+n_trials   <- nrow(bin_matrix)
+
+short_labels <- c(
+  "NARRATIONAL", "REFERENTIAL", "EXPERIENTIAL",
+  "Settings", "Characters", "Objects &\nThings", "Actions",
+  "Music &\nSounds", "Media, Art, &\nTech", "Chronology &\nEvents",
+  "Symbolic &\nSensory", "Subjective &\nPersonal"
+)
+display_order <- c(
+  "NARRATIONAL", "Settings", "Characters", "Objects &\nThings", "Actions",
+  "REFERENTIAL", "Music &\nSounds", "Media, Art, &\nTech", "Chronology &\nEvents",
+  "EXPERIENTIAL", "Symbolic &\nSensory", "Subjective &\nPersonal"
+)
+parent_theme <- c(
+  "Settings" = "NARRATIONAL", "Characters" = "NARRATIONAL",
+  "Objects &\nThings" = "NARRATIONAL", "Actions" = "NARRATIONAL",
+  "Music &\nSounds" = "REFERENTIAL", "Media, Art, &\nTech" = "REFERENTIAL",
+  "Chronology &\nEvents" = "REFERENTIAL",
+  "Symbolic &\nSensory" = "EXPERIENTIAL", "Subjective &\nPersonal" = "EXPERIENTIAL"
+)
+group_lookup <- c(
+  "NARRATIONAL" = "Narrational", "Settings" = "Narrational",
+  "Characters" = "Narrational", "Objects &\nThings" = "Narrational",
+  "Actions" = "Narrational",
+  "REFERENTIAL" = "Referential", "Music &\nSounds" = "Referential",
+  "Media, Art, &\nTech" = "Referential", "Chronology &\nEvents" = "Referential",
+  "EXPERIENTIAL" = "Experiential", "Symbolic &\nSensory" = "Experiential",
+  "Subjective &\nPersonal" = "Experiential"
+)
+
+jaccard_matrix <- matrix(NA, nrow = n, ncol = n, dimnames = list(short_labels, short_labels))
+raw_matrix     <- matrix(0,  nrow = n, ncol = n, dimnames = list(short_labels, short_labels))
+for (i in 1:n) {
+  for (j in 1:n) {
+    both   <- sum(bin_matrix[, i] == 1 & bin_matrix[, j] == 1)
+    either <- sum(bin_matrix[, i] == 1 | bin_matrix[, j] == 1)
+    jaccard_matrix[i, j] <- ifelse(either > 0, both / either, 0)
+    raw_matrix[i, j]     <- both / n_trials
+  }
+}
+
+jaccard_df <- melt(jaccard_matrix); colnames(jaccard_df) <- c("Category1", "Category2", "Jaccard")
+raw_df     <- melt(raw_matrix);     colnames(raw_df)     <- c("Category1", "Category2", "Raw")
+
+combined_df <- left_join(jaccard_df, raw_df, by = c("Category1", "Category2")) %>%
+  mutate(
+    Category1 = factor(Category1, levels = display_order),
+    Category2 = factor(Category2, levels = display_order),
+    i = as.integer(factor(as.character(Category1), levels = display_order)),
+    j = as.integer(factor(as.character(Category2), levels = display_order)),
+    parent1 = parent_theme[as.character(Category1)],
+    parent2 = parent_theme[as.character(Category2)],
+    is_diagonal     = Category1 == Category2,
+    is_parent_child = (as.character(Category1) %in% names(parent_theme) &
+                         parent1 == as.character(Category2)) |
+                      (as.character(Category2) %in% names(parent_theme) &
+                         parent2 == as.character(Category1)),
+    display_val = case_when(
+      is_diagonal | is_parent_child ~ NA_real_,
+      i < j ~ Jaccard,
+      i > j ~ Raw
+    )
+  )
+
+plot_df <- combined_df %>%
+  mutate(
+    Category1 = factor(Category1, levels = display_order),
+    Category2 = factor(Category2, levels = rev(display_order)),
+    idx1   = match(as.character(Category1), display_order),
+    idx2   = match(as.character(Category2), display_order),
+    group1 = factor(group_lookup[as.character(Category1)],
+                    levels = c("Narrational", "Referential", "Experiential")),
+    group2 = factor(group_lookup[as.character(Category2)],
+                    levels = c("Narrational", "Referential", "Experiential")),
+    jaccard_val = ifelse(!is.na(display_val) & idx1 < idx2, display_val, NA),
+    raw_val     = ifelse(!is.na(display_val) & idx1 > idx2, display_val, NA)
+  )
+
+df_jaccard <- filter(plot_df, !is.na(jaccard_val))
+df_raw     <- filter(plot_df, !is.na(raw_val))
+df_grey    <- filter(plot_df, is.na(display_val))
+
+ggplot(plot_df, aes(x = Category1, y = Category2)) +
+  geom_tile(data = df_grey, fill = "grey90", colour = "white", linewidth = 0.5) +
+  geom_tile(data = df_jaccard, aes(fill = jaccard_val), colour = "white", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#69359C", na.value = "transparent",
+                      limits = c(0, 1), guide = "none") +
+  ggnewscale::new_scale_fill() +
+  geom_tile(data = df_raw, aes(fill = raw_val), colour = "white", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#689C35", na.value = "transparent",
+                      limits = c(0, 1), guide = "none") +
+  geom_text(data = filter(plot_df, !is.na(display_val)),
+            aes(label = sprintf("%.2f", display_val)), size = 3) +
+  facet_grid(rows = vars(group2), cols = vars(group1), scales = "free", space = "free") +
+  labs(title    = "Co-occurrence of MIMC QDA Categories",
+       subtitle = "Upper triangle: Jaccard similarity | Lower triangle: raw co-occurrence proportion",
+       caption  = "Purple = Jaccard | Green = raw co-occurrence\nGrey = diagonal or parent–child (not informative)",
+       x = NULL, y = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, colour = "black"),
+        axis.text.y = element_text(colour = "black"),
+        panel.grid = element_blank(), panel.spacing = unit(0.4, "lines"),
+        strip.text.x = element_text(face = "bold", size = 9, colour = "black"),
+        strip.text.y = element_text(face = "bold", size = 9, angle = 0, colour = "black"),
+        plot.title = element_text(face = "bold"), legend.position = "none")
+
+ggsave("mimc_matrix_j-raw.png", dpi = 300)
+```
+
+### Jaccard-Only Matrix
+
+```{r jaccard-only-matrix}
+short_labels2 <- c(
+  "NARRATIONAL", "REFERENTIAL", "EXPERIENTIAL",
+  "Settings", "Characters", "Objects &\nThings", "Actions",
+  "Music &\nSounds", "Media, Art\n& Tech", "Chronology\n& Events",
+  "Symbolic &\nSensory", "Subjective &\nPersonal"
+)
+display_order2 <- c(
+  "NARRATIONAL", "Settings", "Characters", "Objects &\nThings", "Actions",
+  "REFERENTIAL", "Music &\nSounds", "Media, Art\n& Tech", "Chronology\n& Events",
+  "EXPERIENTIAL", "Symbolic &\nSensory", "Subjective &\nPersonal"
+)
+parent_theme2 <- c(
+  "Settings" = "NARRATIONAL", "Characters" = "NARRATIONAL",
+  "Objects &\nThings" = "NARRATIONAL", "Actions" = "NARRATIONAL",
+  "Music &\nSounds" = "REFERENTIAL", "Media, Art\n& Tech" = "REFERENTIAL",
+  "Chronology\n& Events" = "REFERENTIAL",
+  "Symbolic &\nSensory" = "EXPERIENTIAL", "Subjective &\nPersonal" = "EXPERIENTIAL"
+)
+theme_lookup2 <- c(
+  "NARRATIONAL" = "NARRATIONAL", "REFERENTIAL" = "REFERENTIAL",
+  "EXPERIENTIAL" = "EXPERIENTIAL",
+  "Settings" = "NARRATIONAL", "Characters" = "NARRATIONAL",
+  "Objects &\nThings" = "NARRATIONAL", "Actions" = "NARRATIONAL",
+  "Music &\nSounds" = "REFERENTIAL", "Media, Art\n& Tech" = "REFERENTIAL",
+  "Chronology\n& Events" = "REFERENTIAL",
+  "Symbolic &\nSensory" = "EXPERIENTIAL", "Subjective &\nPersonal" = "EXPERIENTIAL"
+)
+
+jm2 <- matrix(0, nrow = n, ncol = n, dimnames = list(short_labels2, short_labels2))
+for (i in 1:n) {
+  for (j in 1:n) {
+    both <- sum(bin_matrix[,i]==1 & bin_matrix[,j]==1)
+    either <- sum(bin_matrix[,i]==1 | bin_matrix[,j]==1)
+    jm2[i,j] <- ifelse(either > 0, both/either, 0)
+  }
+}
+
+jdf2 <- melt(jm2); colnames(jdf2) <- c("Category1","Category2","Jaccard")
+jdf2 <- jdf2 %>%
+  mutate(
+    Category1 = factor(Category1, levels = display_order2),
+    Category2 = factor(Category2, levels = rev(display_order2)),
+    parent1 = parent_theme2[as.character(Category1)],
+    parent2 = parent_theme2[as.character(Category2)],
+    is_diagonal = Category1 == Category2,
+    is_parent_child = (as.character(Category1) %in% names(parent_theme2) &
+                         parent1 == as.character(Category2)) |
+                      (as.character(Category2) %in% names(parent_theme2) &
+                         parent2 == as.character(Category1)),
+    display_val = ifelse(is_diagonal | is_parent_child, NA_real_, Jaccard),
+    row_theme   = theme_lookup2[as.character(Category1)],
+    tile_colour = ifelse(is_diagonal | is_parent_child, "grey", row_theme)
+  )
+
+df_n <- filter(jdf2, tile_colour == "NARRATIONAL")
+df_r <- filter(jdf2, tile_colour == "REFERENTIAL")
+df_e <- filter(jdf2, tile_colour == "EXPERIENTIAL")
+df_g <- filter(jdf2, tile_colour == "grey")
+
+ggplot(jdf2, aes(x = Category1, y = Category2)) +
+  geom_tile(data = df_n, aes(fill = display_val), colour = "white", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#940e8c", na.value = "transparent",
+                      limits = c(0,1), guide = "none") +
+  new_scale_fill() +
+  geom_tile(data = df_r, aes(fill = display_val), colour = "white", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#4b9c00", na.value = "transparent",
+                      limits = c(0,1), guide = "none") +
+  new_scale_fill() +
+  geom_tile(data = df_e, aes(fill = display_val), colour = "white", linewidth = 0.5) +
+  scale_fill_gradient(low = "white", high = "#585ccc", na.value = "transparent",
+                      limits = c(0,1), guide = "none") +
+  new_scale_fill() +
+  geom_tile(data = df_g, fill = "grey90", colour = "white", linewidth = 0.5) +
+  geom_text(aes(label = ifelse(!is.na(display_val), sprintf("%.2f", display_val), "")),
+            size = 2.8) +
+  labs(title    = "Co-occurrence of MIMC QDA Categories",
+       subtitle = "Jaccard similarity index across trials",
+       caption  = "Colour hue = row theme: purple = Narrational, green = Referential, blue = Experiential\nGrey = diagonal or parent–child (not informative)",
+       x = NULL, y = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid = element_blank(), plot.title = element_text(face = "bold"),
+        legend.position = "none")
+```
+
+## Network Analyses
+
+### Jaccard — Fruchterman-Reingold
+
+```{r network-jaccard-fr, fig.width=8.7, fig.height=5.7}
+nine_bin_cols <- c("SETTINGS_bin","CHARACTERS_bin","OBJECTS_THINGS_bin","ACTIONS_bin",
+                   "MUSIC_SOUNDS_bin","MEDIA_ART_TECHNOLOGY_bin","CHRONOLOGY_EVENTS_bin",
+                   "SYMBOLIC_SENSORY_bin","SUBJECTIVE_PERSONAL_bin")
+nine_cats <- c("Settings","Characters","Objects &\nThings","Actions",
+               "Music &\nSounds","Media, Art, &\nTech","Chronology &\nEvents",
+               "Symbolic &\nSensory","Subjective &\nPersonal")
+nine_matrix <- as.matrix(ds[, nine_bin_cols])
+n9 <- length(nine_bin_cols)
+
+jaccard_nine <- matrix(0, nrow=n9, ncol=n9, dimnames=list(nine_cats,nine_cats))
+for (i in 1:n9) for (j in 1:n9) {
+  both <- sum(nine_matrix[,i]==1 & nine_matrix[,j]==1)
+  either <- sum(nine_matrix[,i]==1 | nine_matrix[,j]==1)
+  jaccard_nine[i,j] <- ifelse(either>0, both/either, 0)
+}
+prevalence <- colMeans(nine_matrix); names(prevalence) <- nine_cats
+
+edge_threshold <- 0.11
+edges <- data.frame()
+for (i in 1:(n9-1)) for (j in (i+1):n9) {
+  if (jaccard_nine[i,j] >= edge_threshold)
+    edges <- rbind(edges, data.frame(from=nine_cats[i], to=nine_cats[j],
+                                     weight=jaccard_nine[i,j]))
+}
+
+theme_membership <- data.frame(
+  name  = nine_cats,
+  theme = c("Narrational","Narrational","Narrational","Narrational",
+            "Referential","Referential","Referential","Experiential","Experiential"),
+  prevalence = prevalence)
+
+g <- graph_from_data_frame(edges, directed=FALSE, vertices=theme_membership)
+set.seed(41100)
+
+ggraph(g, layout="fr") +
+  geom_edge_link(aes(width=weight, alpha=weight), colour="grey50") +
+  geom_node_point(aes(size=prevalence, colour=theme)) +
+  geom_node_label(aes(label=name, colour=theme),
+                  repel=TRUE, 
+                  size=3.8, 
+                  fontface="bold",
+                  fill=alpha("white", 0.8),
+                  label.padding=unit(0.2,"lines"), 
+                  label.size=0) +
+  scale_edge_width(range=c(0.5,4), name="Jaccard\nSimilarity") +
+  scale_edge_alpha(range=c(0.3,0.9), guide="none") +
+  scale_size_continuous(range=c(4,14), name="Prevalence\n(prop. of trials)") +
+  scale_colour_manual(values=c(Narrational="#940e8c",Referential="#4b9c00",
+                               Experiential="#585ccc"), name="Theme") +
+  labs(title    = "F-R Co-occurrence Network of MIMC QDA Categories",
+       subtitle = "Fruchterman-Reingold layout\nNode size = prevalence | Edge thickness = Jaccard similarity | Colour = theme",
+       caption  = paste0("Edges shown where Jaccard ≥ ", edge_threshold)) +
+  theme_graph(base_family="sans") +
+  theme(plot.title=element_text(face="bold", size=13),
+        plot.subtitle=element_text(size=10), legend.position="right")
+
+ggsave("mimc_network_fr.png", dpi=300)
+```
+
+### Jaccard — MDS
+
+```{r network-jaccard-mds}
+jaccard_dist <- as.dist(1 - jaccard_nine)
+mds_coords   <- as.data.frame(cmdscale(jaccard_dist, k=2))
+colnames(mds_coords) <- c("x","y"); mds_coords$name <- nine_cats
+
+edge_threshold_mds <- 0.09
+edges_mds <- data.frame()
+for (i in 1:(n9-1)) for (j in (i+1):n9) {
+  if (jaccard_nine[i,j] >= edge_threshold_mds)
+    edges_mds <- rbind(edges_mds, data.frame(from=nine_cats[i], to=nine_cats[j],
+                                             weight=jaccard_nine[i,j]))
+}
+
+tm_mds <- theme_membership %>% left_join(mds_coords, by="name")
+g_mds  <- graph_from_data_frame(edges_mds, directed=FALSE, vertices=tm_mds)
+vo     <- V(g_mds)$name
+lm_mds <- as.matrix(tm_mds[match(vo, tm_mds$name), c("x","y")])
+
+ggraph(g_mds, layout=lm_mds) +
+  geom_edge_link(aes(width=weight, alpha=weight), colour="grey50") +
+  geom_node_point(aes(size=prevalence, colour=theme)) +
+  geom_node_label(aes(label=name, colour=theme), repel=TRUE, size=3,
+                  fill=alpha("white",0.85), label.padding=unit(0.2,"lines"), label.size=0) +
+  scale_edge_width(range=c(0.5,4), name="Jaccard\nSimilarity") +
+  scale_edge_alpha(range=c(0.3,0.9), guide="none") +
+  scale_size_continuous(range=c(4,14), name="Prevalence\n(prop. of trials)") +
+  scale_colour_manual(values=c(Narrational="#940e8c",Referential="#4b9c00",
+                               Experiential="#585ccc"), name="Theme") +
+  labs(title="MDS Co-occurrence Network of MIMC QDA Categories",
+       subtitle="Multidimensional scaling layout",
+       caption=paste0("Classical MDS on Jaccard distance | Edges ≥ ", edge_threshold_mds)) +
+  theme_graph(base_family="sans") +
+  theme(plot.title=element_text(face="bold",size=13), plot.subtitle=element_text(size=10),
+        legend.position="right")
+```
+
+### Jaccard — Kamada-Kawai
+
+```{r network-jaccard-kk}
+kk_layout <- layout_with_kk(
+  graph_from_adjacency_matrix(as.matrix(jaccard_dist), mode="undirected", weighted=TRUE))
+g_kk <- graph_from_data_frame(edges_mds, directed=FALSE, vertices=tm_mds)
+
+ggraph(g_kk, layout="kk") +
+  geom_edge_link(aes(width=weight, alpha=weight), colour="grey50") +
+  geom_node_point(aes(size=prevalence, colour=theme)) +
+  geom_node_label(aes(label=name, colour=theme), repel=TRUE, size=3,
+                  fill=alpha("white",0.85), label.padding=unit(0.2,"lines"), label.size=0) +
+  scale_edge_width(range=c(0.5,4), name="Jaccard\nSimilarity") +
+  scale_edge_alpha(range=c(0.3,0.9), guide="none") +
+  scale_size_continuous(range=c(4,14), name="Prevalence\n(prop. of trials)") +
+  scale_colour_manual(values=c(Narrational="#940e8c",Referential="#4b9c00",
+                               Experiential="#585ccc"), name="Theme") +
+  labs(title="K-K Co-occurrence Network of MIMC QDA Categories",
+       subtitle="Kamada-Kawai layout",
+       caption=paste0("Edges ≥ ", edge_threshold_mds)) +
+  theme_graph(base_family="sans") +
+  theme(plot.title=element_text(face="bold",size=13), plot.subtitle=element_text(size=10),
+        legend.position="right")
+```
+
+### Raw Co-occurrence — Fruchterman-Reingold
+
+```{r network-raw-fr}
+raw_nine <- matrix(0, nrow=n9, ncol=n9, dimnames=list(nine_cats,nine_cats))
+for (i in 1:n9) for (j in 1:n9)
+  raw_nine[i,j] <- sum(nine_matrix[,i]==1 & nine_matrix[,j]==1) / nrow(nine_matrix)
+
+edge_threshold_raw <- 0.05
+edges_raw <- data.frame()
+for (i in 1:(n9-1)) for (j in (i+1):n9) {
+  if (raw_nine[i,j] >= edge_threshold_raw)
+    edges_raw <- rbind(edges_raw, data.frame(from=nine_cats[i], to=nine_cats[j],
+                                             weight=raw_nine[i,j]))
+}
+
+g_raw <- graph_from_data_frame(edges_raw, directed=FALSE, vertices=theme_membership)
+set.seed(41100)
+
+ggraph(g_raw, layout="fr") +
+  geom_edge_link(aes(width=weight, alpha=weight), colour="grey50") +
+  geom_node_point(aes(size=prevalence, colour=theme)) +
+  geom_node_label(aes(label=name, colour=theme), repel=TRUE, size=3.8,
+                  fill=alpha("white",0.8), label.padding=unit(0.2,"lines"), label.size=0) +
+  scale_edge_width(range=c(0.5,4), name="Raw Co-occurrence\nProportion") +
+  scale_edge_alpha(range=c(0.3,0.9), guide="none") +
+  scale_size_continuous(range=c(4,14), name="Prevalence\n(prop. of trials)") +
+  scale_colour_manual(values=c(Narrational="#940e8c",Referential="#4b9c00",
+                               Experiential="#585ccc"), name="Theme") +
+  labs(title="F-R Co-occurrence Network of MIMC QDA Categories",
+       subtitle="Fruchterman-Reingold | Edge thickness = raw co-occurrence proportion",
+       caption=paste0("Edges ≥ ", edge_threshold_raw)) +
+  theme_graph(base_family="sans") +
+  theme(plot.title=element_text(face="bold",size=13), plot.subtitle=element_text(size=10),
+        legend.position="right")
+```
+
+### Raw Co-occurrence — MDS
+
+```{r network-raw-mds}
+raw_dist   <- as.dist(1 - raw_nine)
+mds_raw    <- as.data.frame(cmdscale(raw_dist, k=2))
+colnames(mds_raw) <- c("x","y"); mds_raw$name <- nine_cats
+
+tm_raw <- theme_membership %>% left_join(mds_raw, by="name")
+g_rmds <- graph_from_data_frame(edges_raw, directed=FALSE, vertices=tm_raw)
+vo_r   <- V(g_rmds)$name
+lm_r   <- as.matrix(tm_raw[match(vo_r, tm_raw$name), c("x","y")])
+
+ggraph(g_rmds, layout=lm_r) +
+  geom_edge_link(aes(width=weight, alpha=weight), colour="grey50") +
+  geom_node_point(aes(size=prevalence, colour=theme)) +
+  geom_node_label(aes(label=name, colour=theme), repel=TRUE, size=3,
+                  fill=alpha("white",0.85), label.padding=unit(0.2,"lines"), label.size=0) +
+  scale_edge_width(range=c(0.5,4), name="Raw Co-occurrence\nProportion") +
+  scale_edge_alpha(range=c(0.3,0.9), guide="none") +
+  scale_size_continuous(range=c(4,14), name="Prevalence\n(prop. of trials)") +
+  scale_colour_manual(values=c(Narrational="#940e8c",Referential="#4b9c00",
+                               Experiential="#585ccc"), name="Theme") +
+  labs(title="MDS Co-occurrence Network (Raw)", subtitle="Multidimensional scaling layout",
+       caption=paste0("MDS on raw co-occurrence distance | Edges ≥ ", edge_threshold_raw)) +
+  theme_graph(base_family="sans") +
+  theme(plot.title=element_text(face="bold",size=13), plot.subtitle=element_text(size=10),
+        legend.position="right")
+```
+
+### Raw Co-occurrence — Kamada-Kawai
+
+```{r network-raw-kk}
+kk_raw <- layout_with_kk(
+  graph_from_adjacency_matrix(as.matrix(raw_dist), mode="undirected", weighted=TRUE))
+g_rkk <- graph_from_data_frame(edges_raw, directed=FALSE, vertices=tm_raw)
+
+ggraph(g_rkk, layout="kk") +
+  geom_edge_link(aes(width=weight, alpha=weight), colour="grey50") +
+  geom_node_point(aes(size=prevalence, colour=theme)) +
+  geom_node_label(aes(label=name, colour=theme), repel=TRUE, size=3,
+                  fill=alpha("white",0.85), label.padding=unit(0.2,"lines"), label.size=0) +
+  scale_edge_width(range=c(0.5,4), name="Raw Co-occurrence\nProportion") +
+  scale_edge_alpha(range=c(0.3,0.9), guide="none") +
+  scale_size_continuous(range=c(4,14), name="Prevalence\n(prop. of trials)") +
+  scale_colour_manual(values=c(Narrational="#940e8c",Referential="#4b9c00",
+                               Experiential="#585ccc"), name="Theme") +
+  labs(title="K-K Co-occurrence Network (Raw)", subtitle="Kamada-Kawai layout",
+       caption=paste0("Edges ≥ ", edge_threshold_raw)) +
+  theme_graph(base_family="sans") +
+  theme(plot.title=element_text(face="bold",size=13), plot.subtitle=element_text(size=10),
+        legend.position="right")
+```
+
+### Interactive Network (networkD3)
+
+Drag nodes to explore structure. Hover over edges to see Jaccard values.
+Scroll to zoom; click-drag to pan.
+
+```{r interactive-network}
+cat_vec <- setNames(
+  c("Narrational","Narrational","Narrational","Narrational",
+    "Referential","Referential","Referential","Experiential","Experiential"),
+  nine_cats)
+
+d3  <- igraph_to_networkD3(g, group=cat_vec)
+d3$nodes$prevalence <- prevalence[d3$nodes$name]
+d3$links$weight     <- edges$weight
+
+colour_scale <- JS('d3.scaleOrdinal()
+  .domain(["Narrational","Referential","Experiential"])
+  .range(["#940e8c","#4b9c00","#585ccc"])')
+
+forceNetwork(
+  Links=d3$links, Nodes=d3$nodes,
+  Source="source", Target="target", Value="weight",
+  NodeID="name", Group="group",
+  Nodesize="prevalence", radiusCalculation="d.nodesize * 30 + 5",
+  colourScale=colour_scale, linkDistance=150, charge=-200,
+  fontSize=13, fontFamily="sans-serif", linkColour="#aaaaaa",
+  opacity=0.85, legend=TRUE, bounded=FALSE, zoom=TRUE, opacityNoHover=0.6
+) %>%
+  onRender('
+    function(el, x) {
+      var tooltip = d3.select("body").append("div")
+        .style("position","absolute").style("background","rgba(0,0,0,0.7)")
+        .style("color","white").style("padding","5px 8px")
+        .style("border-radius","4px").style("font-size","12px")
+        .style("pointer-events","none").style("opacity",0);
+      d3.select(el).selectAll(".link")
+        .on("mouseover", function(d) {
+          tooltip.transition().duration(200).style("opacity",1);
+          tooltip.html("Jaccard: " + d.value.toFixed(3))
+            .style("left",(d3.event.pageX+10)+"px")
+            .style("top",(d3.event.pageY-20)+"px");
+        })
+        .on("mousemove", function() {
+          tooltip.style("left",(d3.event.pageX+10)+"px")
+                 .style("top",(d3.event.pageY-20)+"px");
+        })
+        .on("mouseout", function() {
+          tooltip.transition().duration(300).style("opacity",0);
+        });
+    }
+  ')
+```
+
+---
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```

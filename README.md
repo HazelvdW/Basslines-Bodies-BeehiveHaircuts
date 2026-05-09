@@ -64,6 +64,7 @@ Information about the music stimuli used in the study. Contains:
 - **`MIMC-120clips/`** — folder housing the 120 music clips stimuli, covering 10 genres
 - **`stimuli-list.csv`** — structured list of all stimuli with metadata
 - **`stimuli-M17-edit-list`** — information on the edited M17 clips
+- **`originalM17-uneditted/`** - folder housing the original unedited M17 clips from the edit list
 
 ### 📂 `trail/`
 The auditable decision trail documenting the analytical process across all coding stages. Contains:
