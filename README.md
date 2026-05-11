@@ -56,8 +56,12 @@ The codebook documents the full coding scheme developed across the qualitative a
 ### 📂 `data/`
 The core dataset and descriptive analysis. Contains:
 - **`MIMCdata.csv`** — the cleaned study dataset
-- **`MIMC-data-descriptives.Rmd`** — R Markdown file for descriptive statistics and visualisation
-- **`MIMC-data-descriptives.html`** — rendered output of the descriptives analysis
+- **`quantisedQDA.csv`** - the binary quantised qualitative codes
+- **`experimentalQuestions.pdf`** - the experimental study questions layout
+- **`BBBQDA-datadescriptives.Rmd`** — R Markdown file for descriptive statistics and visualisation
+- **`BBBQDA-datadescriptives.html`** — rendered output of the descriptives analysis
+- **`mimc_network_fr.png`** - Fruchterman-Reingold co-occurrence network
+- **`mimc_matrix_j-raw.png`** - co-occurence matrix, Jaccard and raw triangles
 
 ### 📂 `stimuli/`
 Information about the music stimuli used in the study. Contains:
