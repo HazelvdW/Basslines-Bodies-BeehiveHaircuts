@@ -58,8 +58,8 @@ The core dataset and descriptive analysis. Contains:
 - **`MIMCdata.csv`** — the cleaned study dataset
 - **`quantisedQDA.csv`** - the binary quantised qualitative codes
 - **`experimentalQuestions.pdf`** - the experimental study questions layout
-- **`BBBQDA-datadescriptives.Rmd`** — R Markdown file for descriptive statistics and visualisation
-- **`BBBQDA-datadescriptives.html`** — rendered output of the descriptives analysis
+- **`BBBQDA-datadescriptives.Rmd`** — R Markdown file for descriptive statistics and network visualisations
+- **https://hazelvdw.github.io/Basslines-Bodies-BeehiveHaircuts** — rendered output of the analyses
 - **`mimc_network_fr.png`** - Fruchterman-Reingold co-occurrence network
 - **`mimc_matrix_j-raw.png`** - co-occurence matrix, Jaccard and raw triangles
 
