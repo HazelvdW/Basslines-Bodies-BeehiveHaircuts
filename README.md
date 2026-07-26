@@ -1,3 +1,6 @@
+**Read the published article here:**
+> **van der Walle, H. A.**, Margulis, E. H., & Jakubowski, K. (2026). Basslines, Bodies, and Beehive Haircuts: What do we think about when we listen to music? *Imagination, Cognition and Personality*. https://doi.org/10.1177/02762366261465337 
+
 ## _What do we think when we listen to music?_
 ### °‧ 𓆝 𓆟 𓆞 ·｡
 
@@ -18,6 +21,8 @@ _Music‑Influenced Mental Content (MIMC)_ is defined as:
 any mental content people describe as being shaped by, influenced by, attributed to, or associated with music stimuli and its listening context, without requiring an explicit causal claim (e.g. “evoked”, “induced”). 
 
 Framed this way, MIMC captures a heterogeneous range of multimodal experiences and unfolding scenes, spanning visual mental imagery (VMI), imagined narratives, memories, and emotional or musical appraisals.
+
+MIMC is a relational event, not a new natural kind demarcation.
 
 ---
 
